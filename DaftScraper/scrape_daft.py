@@ -6,6 +6,7 @@ from os import getenv
 from os.path import exists
 import json
 import sqlite3
+import pandas as pd
 
 def get_coords(address:str) -> List[float]:
     '''
@@ -39,29 +40,49 @@ def get_coords(address:str) -> List[float]:
     else:
         return data["data"][0]["latitude"], data["data"][0]["longitude"]
 
-def scrape_daft(campaign_id, num_beds, max_price):
+def scrape_daft(campaign_id, num_beds, max_price) -> List[dict]:
+    '''
+    Scrapes the daft website for ads fitting the given criteria and returns a list of dictionaries containing the id, url, address, thumbnail url, price, latitude, and longitude for each new ad.
+    The list will return the details of up to the 10 newest properties that do not exist in the properties table of the database.
 
+    INPUT:
+    - campaign_id (int): The ID for the campaign
+    - num_beds (int): The minimum number of beds for the properties to be searched
+    - max_price (int): The maximum monthly rent to filter the properties by
+
+    OUTPUT:
+    - properties (list): A list of dictionaries for each property scraped. Each dictionary contains the id, url, address, thumbnail url, price, latitude, and longitude of the property.
+    '''
+    # Format url to filter the search to the relevant properties
     url = f'https://www.daft.ie/property-for-rent/dublin-city?rentalPrice_to={str(max_price)}&numBeds_from={str(num_beds)}&sort=publishDateDesc'
     with requests.get(url) as page:
         soup = BeautifulSoup(page.text, "html.parser")
     
+    # Get the list of the properties from the returned html
     results = soup.find('ul', attrs={'data-testid':'results'})
 
     properties = []
     counter = 0
 
     for list_item in results.find_all('li'):
-
+        # Pull the specific data from the html
         id = list_item['data-testid']
         link = list_item.find('a').get('href')
         address = list_item.find('p', attrs={"data-testid":"address"}).text
         price = list_item.find('div', attrs={"data-testid":"price"}).h3.text
         img_url = list_item.find('img').get('src')
 
+        # Exit scrape after 10 properties
         if counter == 10:
             return properties
         else:
+            # Exit scrape if id is already in database
+            existing_id = pd.read_sql_query(f'SELECT daft_id FROM properties WHERE daft_id="{id}";')
+            if len(existing_id['daft_id']) > 0:
+                return properties
+            # Get the latitude and longitude from Position stack
             lat, lon = get_coords(address)
+            # Create the dictionary for the property and append it to the output list
             properties.append(
                 {
                     'daft_id':id, 
